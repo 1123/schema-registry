@@ -18,7 +18,7 @@ package io.confluent.kafka.streams.serdes.json;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.confluent.kafka.schemaregistry.avro.AvroSchema;
+import io.confluent.kafka.serializers.json.KafkaJsonSchemaDeserializerConfig;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -33,6 +33,7 @@ import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.nullValue;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 
 public class KafkaJsonSchemaSerdeTest {
@@ -143,6 +144,64 @@ public class KafkaJsonSchemaSerdeTest {
 
     // Cleanup
     serde.close();
+  }
+
+  public static class Outer {
+    public Super inner;
+  }
+
+  public static abstract class Super { }
+
+  public static class A extends Super {
+    public String id;
+
+    public A() {}
+
+    public A(String id) {
+      this.id = id;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      A a = (A) o;
+      return Objects.equals(id, a.id);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(id);
+    }
+  }
+
+  @Test
+  public void shouldRoundTripJavaObjects() {
+    SchemaRegistryClient schemaRegistryClient = new MockSchemaRegistryClient();
+    KafkaJsonSchemaSerde<A> serde = new KafkaJsonSchemaSerde<>(schemaRegistryClient);
+    Map<String, Object> serdeConfig = new HashMap<>();
+    serdeConfig.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, "fake");
+    serdeConfig.put(KafkaJsonSchemaDeserializerConfig.JSON_VALUE_TYPE, A.class);
+    serde.configure(serdeConfig, false);
+    A original = new A("1234");
+    byte[] serialized = serde.serializer().serialize("some-topic", original);
+    A deserialized = serde.deserializer().deserialize("some-topic", serialized);
+    assertEquals(deserialized, original);
+  }
+
+  @Test
+  public void shouldRoundTripJavaObjectsWithFieldsTypedAsAbstractClasses() {
+    SchemaRegistryClient schemaRegistryClient = new MockSchemaRegistryClient();
+    KafkaJsonSchemaSerde<Outer> serde = new KafkaJsonSchemaSerde<>(schemaRegistryClient);
+    Map<String, Object> serdeConfig = new HashMap<>();
+    serdeConfig.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, "fake");
+    serdeConfig.put(KafkaJsonSchemaDeserializerConfig.JSON_VALUE_TYPE, Outer.class);
+    serde.configure(serdeConfig, false);
+    Outer original = new Outer();
+    original.inner = new A("1234");
+    byte[] serialized = serde.serializer().serialize("some-topic", original);
+    Outer deserialized = serde.deserializer().deserialize("some-topic", serialized);
+    assertEquals(deserialized, original);
   }
 
   @Test(expected = IllegalArgumentException.class)
