@@ -26,6 +26,8 @@ import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
 import io.confluent.kafka.serializers.AbstractKafkaAvroSerDeConfig;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+
 import org.junit.Test;
 
 public class ReflectionAvroSerdeSpecificTest {
@@ -90,6 +92,100 @@ public class ReflectionAvroSerdeSpecificTest {
   @Test(expected = IllegalArgumentException.class)
   public void shouldFailWhenInstantiatedWithNullSchemaRegistryClient() {
     new ReflectionAvroSerde<>(null, Widget.class);
+  }
+
+  @Test
+  public void shouldRoundTripRecordsWithAbstractSuperClasses() {
+    // Given
+    ReflectionAvroSerde<ClassWithAbstractClassAsMember> serde = createConfiguredSerdeForRecordValues(ClassWithAbstractClassAsMember.class);
+    ClassWithAbstractClassAsMember record = new ClassWithAbstractClassAsMember();
+    record.inner = new A("random-id");
+
+    byte[] serialized = serde.serializer().serialize(ANY_TOPIC, record);
+    // When
+    ClassWithAbstractClassAsMember roundtrippedRecord = serde.deserializer().deserialize(ANY_TOPIC, serialized);
+
+    // Then
+    assertThat(roundtrippedRecord, equalTo(record));
+
+    // Cleanup
+    serde.close();
+  }
+
+  public static class ClassWithAbstractClassAsMember {
+
+    public ClassWithAbstractClassAsMember() {}
+
+    public ClassWithAbstractClassAsMember(Super inner) {
+      this.inner = inner;
+    }
+    public Super inner;
+  }
+
+
+  public static abstract class Super { }
+
+  public static class A extends Super {
+    public String id;
+
+    public A() {}
+
+    public A(String id) {
+      this.id = id;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      A a = (A) o;
+      return Objects.equals(id, a.id);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(id);
+    }
+  }
+
+  public static class ClassWithMemberClass {
+
+    public ClassWithMemberClass() {}
+
+    A inner;
+    public ClassWithMemberClass(A inner) {
+      this.inner = inner;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      ClassWithMemberClass that = (ClassWithMemberClass) o;
+      return inner.equals(that.inner);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(inner);
+    }
+  }
+
+  @Test
+  public void shouldRoundTripNestedClasses() {
+    // Given
+    ReflectionAvroSerde<ClassWithMemberClass> serde = createConfiguredSerdeForRecordValues(ClassWithMemberClass.class);
+    ClassWithMemberClass record = new ClassWithMemberClass(new A("random-id"));
+
+    byte[] serialized = serde.serializer().serialize(ANY_TOPIC, record);
+    // When
+    ClassWithMemberClass roundtrippedRecord = serde.deserializer().deserialize(ANY_TOPIC, serialized);
+
+    // Then
+    assertThat(roundtrippedRecord, equalTo(record));
+
+    // Cleanup
+    serde.close();
   }
 
 }
