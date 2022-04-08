@@ -17,8 +17,14 @@
 package io.confluent.kafka.streams.serdes.json;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.jsontype.DefaultBaseTypeLimitingValidator;
+import io.confluent.kafka.serializers.json.AbstractKafkaJsonSchemaDeserializer;
+import io.confluent.kafka.serializers.json.AbstractKafkaJsonSchemaSerializer;
 import io.confluent.kafka.serializers.json.KafkaJsonSchemaDeserializerConfig;
+import org.apache.kafka.common.serialization.Deserializer;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -146,12 +152,31 @@ public class KafkaJsonSchemaSerdeTest {
     serde.close();
   }
 
+  @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY)
   public static class Outer {
     public Super inner;
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      Outer outer = (Outer) o;
+      return Objects.equals(inner, outer.inner);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(inner);
+    }
   }
 
+  @JsonTypeInfo(use = JsonTypeInfo.Id.NAME)
+  @JsonSubTypes({
+          @JsonSubTypes.Type(value = A.class, name = "A")
+  })
   public static abstract class Super { }
 
+  @JsonTypeInfo(use = JsonTypeInfo.Id.NAME)
   public static class A extends Super {
     public String id;
 
@@ -193,6 +218,11 @@ public class KafkaJsonSchemaSerdeTest {
   public void shouldRoundTripJavaObjectsWithFieldsTypedAsAbstractClasses() {
     SchemaRegistryClient schemaRegistryClient = new MockSchemaRegistryClient();
     KafkaJsonSchemaSerde<Outer> serde = new KafkaJsonSchemaSerde<>(schemaRegistryClient);
+    // The following does not help:
+    // AbstractKafkaJsonSchemaDeserializer<Outer> deserializer = (AbstractKafkaJsonSchemaDeserializer<Outer>) serde.deserializer();
+    // deserializer.objectMapper().activateDefaultTyping(new DefaultBaseTypeLimitingValidator(), ObjectMapper.DefaultTyping.EVERYTHING);
+    // AbstractKafkaJsonSchemaSerializer<Outer> serializer = (AbstractKafkaJsonSchemaSerializer<Outer>) serde.serializer();
+    // serializer.objectMapper().activateDefaultTyping(new DefaultBaseTypeLimitingValidator(), ObjectMapper.DefaultTyping.EVERYTHING);
     Map<String, Object> serdeConfig = new HashMap<>();
     serdeConfig.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, "fake");
     serdeConfig.put(KafkaJsonSchemaDeserializerConfig.JSON_VALUE_TYPE, Outer.class);
